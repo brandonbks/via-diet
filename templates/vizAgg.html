@@ -15,8 +15,6 @@
         body {
             background-color: #202e39;
         }
-
-
         .axis path, 
             .axis line{
                 stroke: gray;
@@ -27,8 +25,6 @@
                 opacity: 0.5;
                 stroke-width: 1px;
         }    
-        
-        
         #dailyMetric{
             stroke: #FED966;
             stroke-width: 3;
@@ -80,7 +76,6 @@
             border: 1px solid #26a1a1;
             border-radius: 25px;
         }
-        
         #backButton{
             position: relative;
             top: -150px;
@@ -124,9 +119,11 @@
     <script> 
         //Get raw data of nutrition info from SQL query for current user
         var data = JSON.parse('{{ hist | tojson | safe}}');
-        //Aggregate data over a day
+        //Aggregate data over a day and grouped by meal/snack to create stacked bar chart
         var dataAgg = JSON.parse('{{ histAgg | tojson | safe}}');
+        //Same data but not grouped by meal/snack
         var dataAggDaily = JSON.parse('{{ histAggDaily | tojson | safe}}'); 
+
         //Initiate margins and dimensions for SVG
         var margin = {top: 20, bottom: 20,
                       left: 20, right: 150},
@@ -147,7 +144,6 @@
             dateArr.push(Date.parse(dateStr));
             data[i]["dateTrans"] = Date.parse(dateStr);
         }
-
         for(var i = 0; i<dataAggDaily.length; i++){
             var dateStr = dataAggDaily[i]["dateTrans"];
             dataAggDaily[i]["dateTrans"] = Date.parse(dateStr);
@@ -161,19 +157,20 @@
         function addDays(date, days) {
             var result = new Date(date);
             result.setDate(result.getDate() + days);
-            
             return result;
             }
-        counter = 0;
+
         for(var i = 0; i<dataAgg.length; i++){
             var dateAggArr = [], arrDates = [];
             for(var j = 0; j<dataAgg[i].length; j++){
+                //Parse strings to date objects
                 var dateStr = dataAgg[i][j]["dateTrans"];
                 var date = Date.parse(dateStr);
                 var endDate = Date.parse("2019-07-20")
                 dataAgg[i][j]["dateTrans"] = Date.parse(dateStr);
                 dateAggArr.push(Date.parse(dateStr));
                 for(var k = 0; k<fields.length; k++){
+                    //Fill 0's/fill same nutrition value for previous category to allow for bar stacking
                     if(i==0){
                         dataAgg[i][j][fields[k]+"0"] = 0;
                     } else {
@@ -191,24 +188,30 @@
         var earliestDate = data[0]["dateTrans"],
             latestDate = data[data.length-1]["dateTrans"];
         
+        //Create bar chart based on clicked button; default is Calories view
         updateData("Calories");
         
+        //Create stacked bar chart based on button clicked
         function updateData(metricVal){
+            //3 main macros: carbs, protein, and fats as well as calories
             var metricList = ["Calories", "Carbohydrates", "Protein", "Fats"]
+
+            //On button click, change background color of utton
             for(i = 0; i < metricList.length; i++){
                 document.getElementById(metricList[i]).style.backgroundColor = "#008085";
                 document.getElementById(metricList[i]).style.color = "#b6fbf8";
             }
-
             document.getElementById(metricVal).style.backgroundColor = "#61ded8";
             document.getElementById(metricVal).style.color = "black";
-
+            
+            //Remove all existing SVG to create new bar graph for chosen metric
             svg.selectAll(".snackVal").remove();
             svg.selectAll(".mealVal").remove();
             svg.selectAll(".bar").remove();
             svg.selectAll(".val").remove();
             svg.selectAll(".axis").remove();
-
+            
+            //Mapping of button value to data header
             var metricObj = {"Calories": "calories",
                              "Carbohydrates": "carb",
                              "Protein": "protein",
@@ -216,11 +219,20 @@
             var metric = metricObj[metricVal];
             
 
-            //Create scale for x-axis based on date and y-axis based on caloric intake
+            /*
+            Create scale for x-axis based on date and y-axis based on caloric intake.
+            Domain is min/max of data, and range is the mapped value to plot
+            */
             var xDateScale = d3.time.scale()
                                     .domain([earliestDate, latestDate])
                                     .range([0, w-150]);
-            
+            /*
+            Create scale for y-axis. Named calorie scale because I made the bar chart
+            only for calories at first and was too lazy to change variable name atm lol.
+            Do d3.max twice because the data is stored as an array of objects, where index 0 
+            is for meals and index 1 is for snacks. Each item in an array contains transaction
+            history and nutrition info for all dates (7/1-7/20) for current user logged in.
+            */
             var yCalorieScale = d3.scale.linear()
                                         .domain([0, d3.max(dataAgg, function(d){
                                             return d3.max(d, function(d){
@@ -265,6 +277,7 @@
                 .attr("transform", "translate(" + margin.left*4.25 + "," + (w/10 + c - 100 - 30) + ")")
                 .call(yCalorieAxis);
             
+            //Fill based on group value
             var barGraph = svg.selectAll("g.value")
                         .data(dataAgg).enter().append("g")
                         .attr("class", function(d, i){
@@ -282,7 +295,7 @@
                             }
                         })
 
-
+            //Create bars for bar graph; initial height for animation purposes
             barGraph
                 .selectAll("rect")
                 .data(function(d){
@@ -294,7 +307,6 @@
                     return xDateScale(d["dateTrans"]) + 4.5*margin.left;
                 })
                 .attr("y", function(d){
-                    //return yCalorieScale(yCalorieScale(d["calories0"]+d["calories"])-710)-c;
                     return yCalorieScale(d[metric]+100);
                 })
                 .attr("width", 35)
@@ -304,13 +316,13 @@
                     } else {
                         return yCalorieScale(h/2.5-yCalorieScale(0)+300)
                     }
-                    
-                    //=return (h/2.5)-yCalorieScale(0)-c;
                 })
+                //Add rounded edges to bar graph
                 .attr({ry : 5, rx : 5})
                 .on("mouseover", changeFill)
                 .on("mouseout", reset);
             
+            //Animate true height of bars
             barGraph.selectAll("rect")
                 .transition()
                 .duration(500)
@@ -337,6 +349,8 @@
                         return yCalorieScale(d[metric+"0"]) - yCalorieScale(d[metric+"0"] + d[metric]);
                     }
                 })
+
+            //Append legend
             var legend = svg.append("g")
                             .attr("class", "legend")
                             .attr("transform", "translate(" + (w+40) +", " + 220 + ")")
@@ -365,8 +379,6 @@
                 .attr("font-family", "Source Sans Pro")
                 .attr("fill", "white")
                 .style("font-size", "12");
-
-            
             
             legend.append("rect")
                 .attr("width", "40px")
@@ -382,7 +394,7 @@
                 .attr({ry : 5, rx : 5});
                 
 
-            //Append text near the top of each bar of caloric intake per day
+            //Append text near the top of each bar of metric intake per day
             barGraph
                 .selectAll(".text")
                 .data(dataAggDaily)
@@ -406,7 +418,7 @@
             
             //Interactivity for mouseover events
             function changeFill(d, i){
-                //Change fill color of current bar
+                //Change fill color of current bar deending on snack/meal
                 const dayMetric = d[metric], dateTrans = d["dateTrans"], isMeal = d["isMeal"];
                 const ind = i;
                 d3.select(this)
@@ -420,18 +432,19 @@
                 });
                 
                 var indFound = 0;
+                //Get index of the current bar in the original data array
                 for(i = 0; i<dataAggDaily.length; i++){
                     if(dataAggDaily[i]["dateTrans"]==dateTrans){
                         indFound = i;
                     }
                 }
+                //Get the scale conversion for the total value for current bar (total calorie, etc.) for BOTH snack and meals
                 var line = d3.svg.line()
                                 .y(yCalorieScale(dataAggDaily[indFound][metric])+500);
+                                
                 var calDaily = dataAggDaily[indFound][metric];
-                //Get index of the current bar in the original data array and the caloric intake
                 
-
-                //If the bar is not the current bar that's hovered on, set opacity to 0
+                //If the bar is not the current bar that's hovered on, set opacity to 0.4
                 d3.selectAll(".bar")
                 .attr("opacity", function(d, i){
                     if(d["isMeal"] != isMeal){
@@ -441,7 +454,7 @@
                     }
                 })
                 
-                //Add horizontal dashed line for current bar's caloric intake
+                //Add horizontal dashed line for current bar's metric intake
                 svg.append('g')
                     .append('line')
                     .attr("id", "dailyMetric")
@@ -450,9 +463,8 @@
                     .attr("x2", w+margin.right-23-150)
                     .attr("y2", yCalorieScale(dataAggDaily[indFound][metric])+105+c-100-30)
                 
-                
-                
-                //Append text for all other bars with the difference of caloric intake
+
+                //Append text for all other bars with the difference of metric intake
                 barGraph.selectAll(".text")
                         .data(dataAgg).enter().append("g")
                         .data(function(d){
